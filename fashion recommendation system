@@ -1,1 +1,218 @@
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+import numpy as np
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.keras.applications import VGG16
+from tensorflow.keras.applications.vgg16 import preprocess_input
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.utils import to_categorical
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+
+
+IMG_SIZE = (224, 224)
+
+# Load images and labels
+def load_images_from_folders(data_dir):
+    image_paths = []
+    labels = []
+    categories = os.listdir(data_dir)
+    for category in categories:
+        category_path = os.path.join(data_dir, category)
+        if os.path.isdir(category_path):
+            for img_file in os.listdir(category_path):
+                if img_file.endswith(('.png', '.jpg', '.jpeg')):
+                    image_paths.append(os.path.join(category_path, img_file))
+                    labels.append(category)
+    return image_paths, labels
+
+data_dir = '/content/drive/MyDrive/product_image'  # Update with your folder path
+image_paths, labels = load_images_from_folders(data_dir)
+
+# Preprocess images
+def preprocess_images(image_paths):
+    images = []
+    for path in image_paths:
+        img = load_img(path, target_size=IMG_SIZE)
+        img_array = img_to_array(img) / 255.0  # Normalize
+        images.append(img_array.flatten())  # Flatten the image for KNN
+    return np.array(images)
+
+image_features = preprocess_images(image_paths)
+print(f"Image features shape: {image_features.shape}")  # e.g., (6942, 150528)
+
+
+# Load a pre-trained CNN model (VGG16 in this example)
+feature_extractor = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+
+# Extract features
+def extract_features(image_paths):
+    features = []
+    for path in image_paths:
+        img = load_img(path, target_size=(224, 224))
+        img_array = img_to_array(img)
+        img_array = preprocess_input(img_array)  # Preprocessing specific to VGG16
+        img_array = np.expand_dims(img_array, axis=0)
+        feature = feature_extractor.predict(img_array)  # Extract features
+        features.append(feature.flatten())
+    return np.array(features)
+
+
+
+# Extract features for the dataset
+image_features = extract_features(image_paths)
+print(f"Extracted feature shape: {image_features.shape}")
+
+
+image_paths, labels = load_images_from_folders(data_dir)
+label_mapping = {label: idx for idx, label in enumerate(set(labels))}
+labels_encoded = [label_mapping[label] for label in labels]
+
+
+le = LabelEncoder()
+labels_encoded = le.fit_transform(labels)
+labels_one_hot = to_categorical(labels_encoded)
+
+# Split dataset
+train_paths, test_paths, train_labels, test_labels = train_test_split(
+    image_paths, labels_encoded, test_size=0.2, random_state=42
+)
+
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.keras.callbacks import EarlyStopping
+
+# Define the CNN model
+model = Sequential([
+    Conv2D(32, (3, 3), activation='relu', input_shape=(224, 224, 3)),
+    MaxPooling2D((2, 2)),
+    Conv2D(64, (3, 3), activation='relu'),
+    MaxPooling2D((2, 2)),
+    Conv2D(128, (3, 3), activation='relu'),
+    MaxPooling2D((2, 2)),
+    Flatten(),
+    Dense(256, activation='relu'),
+    Dropout(0.5),
+    Dense(len(label_mapping), activation='softmax')  # Output layer
+])
+
+# Compile the model
+model.compile(optimizer=Adam(learning_rate=0.001),
+              loss='categorical_crossentropy',
+              metrics=['accuracy'])
+
+# Early stopping to prevent overfitting
+early_stopping = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
+
+# Split data into training and validation sets
+X_train, X_val, y_train, y_val = train_test_split(image_features, labels_one_hot, test_size=0.2, random_state=42)
+
+# Check the shapes of the splits
+print(f"Training features shape: {X_train.shape}")
+print(f"Validation features shape: {X_val.shape}")
+
+
+# Train the model
+history = model.fit(
+    x_train, y_train,
+    validation_data=(x_val, y_val),
+    epochs=10,
+    batch_size=32,
+    callbacks=[early_stopping]
+)
+
+
+import matplotlib.pyplot as plt
+
+# Plot the training and validation accuracy
+plt.plot(history.history['accuracy'], label='Training Accuracy')
+plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+plt.title('Training vs Validation Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.show()
+
+# Plot the training and validation loss
+plt.plot(history.history['loss'], label='Training Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.title('Training vs Validation Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.show()
+
+
+# Predict the class for a new image
+test_image_path = '/content/drive/MyDrive/shoe1.jpg'  # Replace with the path of your test image
+test_image_features = extract_features([test_image_path])
+
+# Predict the class
+predicted_class = cnn_model.predict(test_image_features)
+predicted_label = np.argmax(predicted_class)  # Get the class with the highest probability
+predicted_category = le.inverse_transform([predicted_label])
+
+print(f"Predicted category: {predicted_category[0]}")
+
+
+
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+
+# Function to find recommendations based on CNN features
+def recommend_similar_images_cnn(test_image_path, feature_extractor, image_features, image_paths, top_n=5):
+    # Extract features for the test image
+    test_image_features = extract_features([test_image_path])
+
+    # Compute cosine similarity
+    similarities = cosine_similarity(test_image_features, image_features)
+
+    # Get indices of top N similar images
+    similar_indices = np.argsort(similarities[0])[::-1][:top_n]
+
+    # Retrieve paths of recommended images
+    recommended_images = [image_paths[i] for i in similar_indices]
+    return recommended_images
+
+# Get recommendations
+recommended_images_cnn = recommend_similar_images_cnn(
+    test_image_path, feature_extractor, image_features, image_paths, top_n=5
+)
+
+# Function to visualize recommendations
+def visualize_recommendations_cnn(test_image_path, recommended_images):
+    plt.figure(figsize=(12, 8))
+
+    # Display input image
+    input_img = mpimg.imread(test_image_path)
+    plt.subplot(2, 3, 1)
+    plt.imshow(input_img)
+    plt.title("Input Image")
+    plt.axis('off')
+
+    # Display recommended images
+    for i, recommended_img in enumerate(recommended_images):
+        img = mpimg.imread(recommended_img)
+        plt.subplot(2, 3, i + 2)
+        plt.imshow(img)
+        plt.title(f"Recommended {i + 1}")
+        plt.axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
+# Visualize the input image and recommendations
+visualize_recommendations_cnn(test_image_path, recommended_images_cnn)
+
+
+
+
+
+
 
